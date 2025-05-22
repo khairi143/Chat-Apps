@@ -1,51 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
-import 'package:intl/intl.dart';
 
-class ChatScreen extends StatefulWidget {
+class ChatScreen extends StatelessWidget {
   const ChatScreen({super.key});
 
   @override
-  _ChatScreenState createState() => _ChatScreenState();
-}
-
-class _ChatScreenState extends State<ChatScreen> {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final TextEditingController _messageController = TextEditingController();
-  bool _showEmojiPicker = false;
-
-  User? get currentUser => _auth.currentUser;
-
-  Future<void> _sendMessage() async {
-    if (_messageController.text.trim().isEmpty) return;
-
-    await _firestore.collection('messages').add({
-      'text': _messageController.text,
-      'senderId': currentUser?.uid,
-      'senderName': currentUser?.displayName ?? 'Anonymous',
-      'timestamp': FieldValue.serverTimestamp(),
-    });
-
-    _messageController.clear();
-  }
-
-  @override
   Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+
     return Scaffold(
-      backgroundColor: Colors.pink[50],
       appBar: AppBar(
-        title: const Text('Cute Chat 🐰'),
-        backgroundColor: Colors.pink,
+        title: const Text('Chat'),
         actions: [
           IconButton(
             icon: const Icon(Icons.exit_to_app),
-            onPressed: () async {
-              await _auth.signOut();
-              // Navigate back to auth screen
-            },
+            onPressed: () => FirebaseAuth.instance.signOut(),
           ),
         ],
       ),
@@ -53,136 +23,145 @@ class _ChatScreenState extends State<ChatScreen> {
         children: [
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
-              stream: _firestore
+              stream: FirebaseFirestore.instance
                   .collection('messages')
                   .orderBy('timestamp', descending: true)
+                  .limit(100) // Limit messages to stay within free tier
                   .snapshots(),
               builder: (context, snapshot) {
-                if (!snapshot.hasData) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
                 }
-
-                final messages = snapshot.data!.docs;
+                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                  return const Center(child: Text('No messages yet'));
+                }
 
                 return ListView.builder(
                   reverse: true,
-                  itemCount: messages.length,
+                  itemCount: snapshot.data!.docs.length,
                   itemBuilder: (context, index) {
-                    final message = messages[index];
-                    final isMe = message['senderId'] == currentUser?.uid;
+                    final doc = snapshot.data!.docs[index];
+                    final isMe = doc['senderId'] == user?.uid;
 
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(
-                        vertical: 4,
-                        horizontal: 8,
-                      ),
-                      child: Align(
-                        alignment: isMe
-                            ? Alignment.centerRight
-                            : Alignment.centerLeft,
-                        child: Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: isMe ? Colors.pink[200] : Colors.white,
-                            borderRadius: BorderRadius.only(
-                              topLeft: const Radius.circular(16),
-                              topRight: const Radius.circular(16),
-                              bottomLeft: isMe
-                                  ? const Radius.circular(16)
-                                  : const Radius.circular(4),
-                              bottomRight: isMe
-                                  ? const Radius.circular(4)
-                                  : const Radius.circular(16),
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.1),
-                                blurRadius: 4,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (!isMe)
-                                Text(
-                                  message['senderName'],
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 12,
-                                    color: Colors.pink,
-                                  ),
-                                ),
-                              Text(message['text']),
-                              const SizedBox(height: 4),
-                              Text(
-                                DateFormat('HH:mm').format(
-                                    (message['timestamp'] as Timestamp).toDate(),
-                                ),
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: Colors.grey[600],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
+                    return MessageBubble(
+                      text: doc['text'],
+                      sender: doc['senderEmail'],
+                      isMe: isMe,
                     );
                   },
                 );
               },
             ),
           ),
-if (_showEmojiPicker)
-  SizedBox(
-    height: 250,
-    child: EmojiPicker(
-      onEmojiSelected: (category, emoji) {
-        _messageController.text += emoji.emoji;
-      },
-      config: const Config(
-        // New way to configure (check package docs for latest options)
-        emojiViewConfig: EmojiViewConfig(
-          columns: 7,
-          emojiSizeMax: 32, // Note: This might now be in 'size'
-          backgroundColor: Color(0xFFF2F2F2),
-        ),
-        // Other configurations if needed
+          const MessageInput(),
+        ],
       ),
-    ),
-  ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            color: Colors.white,
-            child: Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.emoji_emotions, color: Colors.pink),
-                  onPressed: () {
-                    setState(() {
-                      _showEmojiPicker = !_showEmojiPicker;
-                    });
-                  },
+    );
+  }
+}
+
+class MessageBubble extends StatelessWidget {
+  final String text;
+  final String sender;
+  final bool isMe;
+
+  const MessageBubble({
+    super.key,
+    required this.text,
+    required this.sender,
+    required this.isMe,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(8.0),
+      child: Column(
+        crossAxisAlignment:
+            isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        children: [
+          Text(sender, style: const TextStyle(fontSize: 12)),
+          Material(
+            borderRadius: BorderRadius.circular(8.0),
+            elevation: 2.0,
+            color: isMe ? Colors.blue : Colors.grey[300],
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                vertical: 10.0,
+                horizontal: 16.0,
+              ),
+              child: Text(
+                text,
+                style: TextStyle(
+                  color: isMe ? Colors.white : Colors.black,
                 ),
-                Expanded(
-                  child: TextField(
-                    controller: _messageController,
-                    decoration: InputDecoration(
-                      hintText: 'Type a cute message...',
-                      border: InputBorder.none,
-                      suffixIcon: IconButton(
-                        icon: const Icon(Icons.send, color: Colors.pink),
-                        onPressed: _sendMessage,
-                      ),
-                    ),
-                    onSubmitted: (_) => _sendMessage(),
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class MessageInput extends StatefulWidget {
+  const MessageInput({super.key});
+
+  @override
+  State<MessageInput> createState() => _MessageInputState();
+}
+
+class _MessageInputState extends State<MessageInput> {
+  final _messageController = TextEditingController();
+  bool _isSending = false;
+
+  Future<void> _sendMessage() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || _messageController.text.isEmpty) return;
+
+    setState(() => _isSending = true);
+    try {
+      await FirebaseFirestore.instance.collection('messages').add({
+        'text': _messageController.text.trim(),
+        'senderId': user.uid,
+        'senderEmail': user.email ?? 'Anonymous',
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+      _messageController.clear();
+    } finally {
+      if (mounted) setState(() => _isSending = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _messageController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(8.0),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _messageController,
+              decoration: const InputDecoration(
+                hintText: 'Type a message...',
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: (_) => _sendMessage(),
+            ),
+          ),
+          const SizedBox(width: 8),
+          _isSending
+              ? const CircularProgressIndicator()
+              : IconButton(
+                  icon: const Icon(Icons.send),
+                  onPressed: _sendMessage,
+                ),
         ],
       ),
     );
