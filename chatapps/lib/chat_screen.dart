@@ -26,7 +26,7 @@ class ChatScreen extends StatelessWidget {
               stream: FirebaseFirestore.instance
                   .collection('messages')
                   .orderBy('timestamp', descending: true)
-                  .limit(100) // Limit messages to stay within free tier
+                  .limit(100)
                   .snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
